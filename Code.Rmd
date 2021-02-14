@@ -1,0 +1,206 @@
+---
+title: "City of Melbourne Population Forecasts in 2041 - Age and Gender" 
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+# Required packages
+library(flexdashboard)
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(maptools)
+library(broom)
+
+# Import data
+url <- "https://data.melbourne.vic.gov.au/resource/vtsx-jhki.csv"
+pop <- read_csv(url) 
+areas <- readShapeSpatial("Census_of_Land_Use_and_Employment__CLUE__Suburb/Census_of_Land_Use_and_Employment_(CLUE)_Suburb.shp")
+
+# Data pre-processing for Row 1
+pop.2041 <- pop %>% filter(year == 2041 & geography == "City of Melbourne")
+pop.2041 <- pop.2041$total_population
+
+pop.2020 <- pop %>% filter(year == 2020 & geography == "City of Melbourne")
+pop.2020 <- pop.2020$total_population
+pop.increased <- pop.2041 - pop.2020
+
+pop.2041 <- prettyNum(pop.2041, big.mark = ",", scientific = FALSE)
+pop.2020 <- prettyNum(pop.2020, big.mark = ",", scientific = FALSE)
+pop.increased <- prettyNum(pop.increased, big.mark = ",", scientific = FALSE)
+
+pop.sex <- pop %>% filter(year == 2041 & geography == "City of Melbourne") %>% select(male_population, female_population, total_population)
+pop.female.ratio <- round(pop.sex$female_population / pop.sex$total_population, 2)
+pop.male.ratio <- round(pop.sex$male_population / pop.sex$total_population, 2)
+# Data pre-processing for Row 2 Chart A
+pop.area <- pop %>% filter(year == 2041 & geography != "City of Melbourne") %>% select(geography, male_population, female_population)
+colnames(pop.area)[2] <- "Male"
+colnames(pop.area)[3] <- "Female"
+pop.area <- pop.area %>% gather(Male, Female, key = "Gender", value = "Population")
+pop.area$Gender <- factor(pop.area$Gender)
+pop.area$geography <- factor(pop.area$geography)
+# Data pre-processing for Row 2 Chart B
+cols <- colnames(pop)
+pop.age.dist <- pop %>% filter(year == 2041 & geography == "City of Melbourne") %>% select(cols[4:21])
+pop.age.dist.long <- pop.age.dist %>% gather(cols[4:21], key = "age_range", value = "population")
+pop.age.dist.long$age_range <- factor(pop.age.dist.long$age_range,
+                                      label = c("0-4", "5-9", "10-14", "15-19",
+                                                "20-24", "25-29", "30-34", "35-39",
+                                                "40-44", "45-49", "50-54", "55-59",
+                                                "60-64", "65-69", "70-74", "75-79",
+                                                "80-84", "85+"),
+                                      ordered = TRUE)
+
+# Data pre-processing for Row 3 Chart C
+pop.child <- pop %>% select(year, geography, total_0_4_years, total_5_9_years, total_10_14_years, total_population)
+pop.child$Ratio <- (pop.child$total_0_4_years +
+                    pop.child$total_5_9_years +
+                    pop.child$total_10_14_years) / pop.child$total_population
+pop.child <- pop.child %>% filter(year == 2041 & geography != "City of Melbourne") %>% select(year, geography, Ratio)
+
+areas.f <- tidy(areas, region = "FEATURENAM")
+areas.f$geography <- areas.f$id
+
+merged.child <- merge(areas.f, pop.child, by = "geography", all.x = TRUE)
+choro_child <- merged.child[order(merged.child$order), ]
+
+# Data pre-processing for Row 3 Chart D
+pop.young <- pop %>% select(year, geography, total_15_19_years, total_20_24_years, total_25_29_years, total_population)
+pop.young$Ratio <- (pop.young$total_15_19_years +
+                    pop.young$total_20_24_years +
+                    pop.young$total_25_29_years) / pop.young$total_population
+pop.young <- pop.young %>% filter(year == 2041 & geography != "City of Melbourne") %>% select(year, geography, Ratio)
+
+merged.young <- merge(areas.f, pop.young, by = "geography", all.x = TRUE)
+choro_young <- merged.young[order(merged.young$order), ]
+
+# Data pre-processing for Row 3 Chart E
+pop.old <- pop %>% select(year, geography, total_65_69_years, total_70_74_years, total_75_79_years, total_80_84_years, total_85_years_and_over, total_population)
+pop.old$Ratio<- (pop.old$total_65_69_years +
+                 pop.old$total_70_74_years +
+                 pop.old$total_75_79_years + 
+                 pop.old$total_80_84_years +
+                 pop.old$total_85_years_and_over) / pop.old$total_population
+pop.old <- pop.old %>% filter(year == 2041 & geography != "City of Melbourne") %>% select(year, geography, Ratio)
+
+merged.old <- merge(areas.f, pop.old, by = "geography", all.x = TRUE)
+choro_old <- merged.old[order(merged.old$order), ]
+```
+
+Dashboard
+=======================================================================
+
+Row {data-height=50}
+-----------------------------------------------------------------------
+
+### Total Population in 2041
+
+```{r}
+valueBox(pop.2041, icon = "fa-user", caption = "Total Population in 2041", color = "green")
+```
+
+### Population Increased
+
+```{r}
+valueBox(pop.increased, icon = "fa-user-plus", caption = "Population Increased Comparing 2020", color = "orange")
+```
+
+### Male Ratio
+
+```{r}
+valueBox(pop.male.ratio, icon = "fa-male", caption = "Male Ratio (General)", color = "skyblue")
+```
+
+### Female Ratio
+
+```{r}
+valueBox(pop.female.ratio, icon = "fa-female", caption = "Female Ratio (General)", color = "coral")
+```
+
+Row {data-height=475}
+-----------------------------------------------------------------------
+
+### The Population Distribution in Each Area
+
+```{r}
+p1 <- ggplot(pop.area, aes(x = reorder(geography, -Population), y = Population, fill = Gender)) + 
+  geom_bar(stat = "identity", width = 0.8, position = "dodge") +
+  labs(x = "Areas", y = "Population") + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 10),
+        panel.grid.major.x = element_blank()) 
+ggplotly(p1)
+```
+
+### Population in Different Age Group
+
+```{r}
+p2 <- ggplot(pop.age.dist.long, aes(x = age_range, y = population)) +
+  geom_bar(stat = "identity", fill = "darkorange", width = 0.8) +
+  labs(x = "Age Groups", y = "Population") + 
+  theme_minimal() + 
+  theme(panel.grid.major.x = element_blank())
+ggplotly(p2)
+```
+
+Row{data_height = 475}
+-----------------------------------------------------------------------
+
+### Children (age 0 to 14) Ratio of Each Small Area
+
+```{r}
+p3 <- ggplot(data = choro_child, aes(x = long, y = lat, group = group, fill = Ratio))+ 
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_continuous(low = 'white', high = "lightpink3") +
+  coord_quickmap() + 
+  theme_minimal() + theme(axis.title.x = element_blank(),
+                          axis.title.y = element_blank(),
+                          axis.text.y = element_blank(),
+                          axis.text.x = element_blank(),
+                          panel.grid = element_blank())
+ggplotly(p3)
+```
+
+### Young People (age 15 to 29) Ratio of Each Small Area
+
+```{r}
+p4 <- ggplot(data = choro_young, aes(x = long, y = lat, group = group, fill = Ratio))+ 
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_continuous(low = 'white', high = "lightgreen") +
+  coord_quickmap() + 
+  theme_minimal() + theme(axis.title.x = element_blank(),
+                          axis.title.y = element_blank(),
+                          axis.text.y = element_blank(),
+                          axis.text.x = element_blank(),
+                          panel.grid = element_blank())
+ggplotly(p4)
+```
+
+### Older People (age 65 and over) Ratio of Each Small Area
+```{r}
+p5 <- ggplot(data = choro_old, aes(x = long, y = lat, group = group, fill = Ratio))+ 
+  geom_polygon(color = "black", size = 0.1) +
+  scale_fill_continuous(low = 'white', high = "skyblue3") +
+  coord_quickmap() + 
+  theme_minimal() + theme(axis.title.x = element_blank(),
+                          axis.title.y = element_blank(),
+                          axis.text.y = element_blank(),
+                          axis.text.x = element_blank(),
+                          panel.grid = element_blank())
+ggplotly(p5)
+```
+
+Reference
+=======================================================================
+
+Reference:
+
+* City of Melbourne (2020), City of Melbourne Population Forecasts 2016 to 2041 – Age and Gender, Retrieved June 1st, 2020, from City of Melbourne Open Data Website: https://data.melbourne.vic.gov.au/People/City-of-Melbourne-Population-Forecasts-2016-to-204/vtsx-jhki
+* City of Melbourne Open Data Team (2020), Small Areas for Census of Land Use and Employment (CLUE), Retrieved June 1 st, 2020, from City of Melbourne Open Data Website:
+https://data.melbourne.vic.gov.au/Business/Small-Areas-for-Census-of-Land-Use-and-Employment-/gei8-3w86
